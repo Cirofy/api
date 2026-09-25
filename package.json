@@ -1,0 +1,1 @@
+{"name":"cirofy-api-workspace","private":true,"packageManager":"pnpm@9.15.0","scripts":{"dev":"pnpm --filter @cirofy/api dev","build":"pnpm --filter @cirofy/shared build && pnpm --filter @cirofy/api build","start":"pnpm --filter @cirofy/api start","lint":"pnpm --filter @cirofy/api lint"},"engines":{"node":"20.x"}}
