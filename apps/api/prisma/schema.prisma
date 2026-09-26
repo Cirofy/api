@@ -1,0 +1,658 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto]
+  schemas    = ["public", "marketplace", "billing", "analytics", "audit"]
+}
+
+enum Role {
+  OWNER
+  MEMBER
+  ADMIN
+  SUPER_ADMIN
+
+  @@schema("public")
+}
+
+enum Marketplace {
+  TRENDYOL
+  HEPSIBURADA
+
+  @@schema("public")
+}
+
+enum PlanId {
+  STARTER
+  BUSINESS
+  ENTERPRISE
+
+  @@schema("public")
+}
+
+enum BillingInterval {
+  MONTH
+  YEAR
+
+  @@schema("public")
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+
+  @@schema("public")
+}
+
+enum OrderStatus {
+  CREATED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURNED
+
+  @@schema("public")
+}
+
+model User {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  fullName     String    @map("full_name")
+  role         Role      @default(OWNER)
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  memberships Membership[]
+  auditLogs   AuditLog[]
+
+  @@map("users")
+  @@schema("public")
+}
+
+model Organization {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  memberships       Membership[]
+  stores            Store[]
+  subscription      Subscription?
+  products          Product[]
+  orders            Order[]
+  notifications     Notification[]
+  teamInvites       TeamInvite[]
+  settlementPeriods SettlementPeriod[]
+  settlementIssues  SettlementIssue[]
+  buyboxCaptures    BuyboxCapture[]
+  supportTickets    SupportTicket[]
+  reportMailPref    ReportMailPref?
+  reportDigestJobs  ReportDigestJob[]
+  promoOffers       PromoOffer[]
+  priceApplyLogs    PriceApplyLog[]
+  radarPref         RadarPref?
+  savedScenarios    SavedScenario[]
+  scenarioComparisons ScenarioComparison[]
+  commissionTariffs CommissionTariff[]
+  commissionTariffOverrides CommissionTariffOverride[]
+  commissionBarcodeRates CommissionBarcodeRate[]
+  commissionBrandRates CommissionBrandRate[]
+
+  @@map("organizations")
+  @@schema("public")
+}
+
+model Membership {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  role           Role     @default(OWNER)
+  teamRole       String   @default("ops") @map("team_role")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@map("memberships")
+  @@schema("public")
+}
+
+model Store {
+  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String      @map("organization_id") @db.Uuid
+  marketplace        Marketplace
+  name               String
+  externalStoreId    String?     @map("external_store_id")
+  apiKeyEncrypted    String?     @map("api_key_encrypted")
+  apiSecretEncrypted String?     @map("api_secret_encrypted")
+  isConnected        Boolean     @default(false) @map("is_connected")
+  lastSyncAt         DateTime?   @map("last_sync_at")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products     Product[]
+  orders       Order[]
+  tariffOverrides CommissionTariffOverride[]
+
+  @@index([organizationId, marketplace])
+  @@map("stores")
+  @@schema("marketplace")
+}
+
+model Product {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  storeId        String   @map("store_id") @db.Uuid
+  externalId     String   @map("external_id")
+  sku            String?
+  barcode        String?
+  brand          String?
+  category       String?
+  title          String
+  costPrice      Decimal  @default(0) @map("cost_price") @db.Decimal(14, 2)
+  costVatRate    Decimal  @default(20) @map("cost_vat_rate") @db.Decimal(7, 4)
+  desi           Decimal  @default(1) @map("desi") @db.Decimal(10, 3)
+  salePrice      Decimal  @default(0) @map("sale_price") @db.Decimal(14, 2)
+  commissionRate Decimal  @default(0) @map("commission_rate") @db.Decimal(7, 4)
+  shippingCost   Decimal  @default(0) @map("shipping_cost") @db.Decimal(14, 2)
+  returnRatePct  Decimal  @default(0) @map("return_rate_pct") @db.Decimal(7, 4)
+  stockQty       Int?     @map("stock_qty")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orderItems   OrderItem[]
+
+  @@unique([storeId, externalId])
+  @@index([organizationId])
+  @@index([title])
+  @@index([brand])
+  @@map("products")
+  @@schema("marketplace")
+}
+
+model Order {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  storeId        String      @map("store_id") @db.Uuid
+  externalId     String      @map("external_id")
+  status         OrderStatus @default(CREATED)
+  orderedAt      DateTime    @map("ordered_at")
+  grossAmount    Decimal     @map("gross_amount") @db.Decimal(14, 2)
+  commission     Decimal     @default(0) @db.Decimal(14, 2)
+  shippingFee    Decimal     @default(0) @map("shipping_fee") @db.Decimal(14, 2)
+  serviceFee     Decimal     @default(0) @map("service_fee") @db.Decimal(14, 2)
+  vatNet         Decimal     @default(0) @map("vat_net") @db.Decimal(14, 2)
+  withholding    Decimal     @default(0) @db.Decimal(14, 2)
+  costTotal      Decimal     @default(0) @map("cost_total") @db.Decimal(14, 2)
+  netProfit      Decimal     @default(0) @map("net_profit") @db.Decimal(14, 2)
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  items        OrderItem[]
+
+  @@unique([storeId, externalId])
+  @@index([organizationId, orderedAt])
+  @@index([orderedAt])
+  @@map("orders")
+  @@schema("marketplace")
+}
+
+model OrderItem {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId   String  @map("order_id") @db.Uuid
+  productId String? @map("product_id") @db.Uuid
+  quantity  Int     @default(1)
+  unitPrice Decimal @map("unit_price") @db.Decimal(14, 2)
+  unitCost  Decimal @default(0) @map("unit_cost") @db.Decimal(14, 2)
+  netProfit Decimal @default(0) @map("net_profit") @db.Decimal(14, 2)
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@map("order_items")
+  @@schema("marketplace")
+}
+
+model Subscription {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String             @unique @map("organization_id") @db.Uuid
+  planId             PlanId             @map("plan_id")
+  interval           BillingInterval    @default(MONTH)
+  status             SubscriptionStatus @default(TRIALING)
+  dodoCustomerId     String?            @map("dodo_customer_id")
+  dodoSubscriptionId String?            @unique @map("dodo_subscription_id")
+  dodoProductId      String?            @map("dodo_product_id")
+  currentPeriodStart DateTime?          @map("current_period_start")
+  currentPeriodEnd   DateTime?          @map("current_period_end")
+  trialEndsAt        DateTime?          @map("trial_ends_at")
+  canceledAt         DateTime?          @map("canceled_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payments     Payment[]
+
+  @@map("subscriptions")
+  @@schema("billing")
+}
+
+model Payment {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subscriptionId String    @map("subscription_id") @db.Uuid
+  dodoPaymentId  String?   @unique @map("dodo_payment_id")
+  amount         Decimal   @db.Decimal(14, 2)
+  currency       String    @default("TRY")
+  status         String
+  rawPayload     Json?     @map("raw_payload")
+  paidAt         DateTime? @map("paid_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@map("payments")
+  @@schema("billing")
+}
+
+model DailyStoreMetric {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  storeId        String   @map("store_id") @db.Uuid
+  day            DateTime @db.Date
+  orderCount     Int      @default(0) @map("order_count")
+  grossAmount    Decimal  @default(0) @map("gross_amount") @db.Decimal(16, 2)
+  netProfit      Decimal  @default(0) @map("net_profit") @db.Decimal(16, 2)
+  marginPct      Decimal  @default(0) @map("margin_pct") @db.Decimal(8, 4)
+
+  @@unique([storeId, day])
+  @@index([organizationId, day])
+  @@map("daily_store_metrics")
+  @@schema("analytics")
+}
+
+model Notification {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String    @map("organization_id") @db.Uuid
+  dedupeKey       String?   @map("dedupe_key")
+  title           String
+  body            String
+  tone            String    @default("warn")
+  href            String
+  actionLabel     String    @map("action_label")
+  secondaryHref   String?   @map("secondary_href")
+  secondaryLabel  String?   @map("secondary_label")
+  readAt          DateTime? @map("read_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, dedupeKey])
+  @@index([organizationId, createdAt])
+  @@map("notifications")
+  @@schema("analytics")
+}
+
+model TeamInvite {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  email          String
+  fullName       String    @map("full_name")
+  teamRole       String    @map("team_role")
+  token          String    @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status         String    @default("pending")
+  expiresAt      DateTime  @default(now()) @map("expires_at")
+  acceptedAt     DateTime? @map("accepted_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([organizationId, status])
+  @@index([token])
+  @@map("team_invites")
+  @@schema("analytics")
+}
+
+model SettlementPeriod {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  storeId        String    @map("store_id") @db.Uuid
+  periodKey      String    @map("period_key")
+  periodLabel    String    @map("period_label")
+  expected       Decimal   @db.Decimal(14, 2)
+  paid           Decimal   @db.Decimal(14, 2)
+  diff           Decimal   @db.Decimal(14, 2)
+  status         String
+  paidAt         DateTime? @map("paid_at") @db.Date
+  computedAt     DateTime  @default(now()) @map("computed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  issues       SettlementIssue[]
+
+  @@unique([organizationId, storeId, periodKey])
+  @@index([organizationId, storeId, computedAt])
+  @@map("settlement_periods")
+  @@schema("analytics")
+}
+
+model SettlementIssue {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String    @map("organization_id") @db.Uuid
+  storeId         String    @map("store_id") @db.Uuid
+  periodId        String?   @map("period_id") @db.Uuid
+  dedupeKey       String    @map("dedupe_key")
+  type            String
+  orderExternalId String    @map("order_external_id")
+  periodLabel     String    @map("period_label")
+  expected        Decimal   @db.Decimal(14, 2)
+  billed          Decimal   @db.Decimal(14, 2)
+  diff            Decimal   @db.Decimal(14, 2)
+  note            String
+  status          String    @default("open")
+  resolvedAt      DateTime? @map("resolved_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       SettlementPeriod? @relation(fields: [periodId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, dedupeKey])
+  @@index([organizationId, storeId, type])
+  @@index([organizationId, status])
+  @@map("settlement_issues")
+  @@schema("analytics")
+}
+
+model BuyboxCapture {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  sku            String
+  marketplace    String
+  buyboxPrice    Decimal  @map("buybox_price") @db.Decimal(14, 2)
+  ourPrice       Decimal? @map("our_price") @db.Decimal(14, 2)
+  merchantName   String?  @map("merchant_name")
+  winner         String?  // us | competitor
+  capturedAt     DateTime @map("captured_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, sku])
+  @@index([organizationId, capturedAt])
+  @@map("buybox_captures")
+  @@schema("analytics")
+}
+
+model SupportTicket {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  topic          String
+  subject        String
+  body           String
+  status         String    @default("open")
+  priority       String    @default("normal")
+  contactEmail   String?   @map("contact_email")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  resolvedAt     DateTime? @map("resolved_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, priority, createdAt])
+  @@map("support_tickets")
+  @@schema("analytics")
+}
+
+model ReportMailPref {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @unique @map("organization_id") @db.Uuid
+  email          String   @default("")
+  daily          Boolean  @default(false)
+  monthly        Boolean  @default(false)
+  tariffChange   Boolean  @default(false) @map("tariff_change")
+  sendHourUtc    Int      @default(6) @map("send_hour_utc")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("report_mail_prefs")
+  @@schema("analytics")
+}
+
+model ReportDigestJob {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  cadence        String
+  email          String
+  status         String
+  note           String?
+  payload        Json?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  sentAt         DateTime? @map("sent_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@map("report_digest_jobs")
+  @@schema("analytics")
+}
+
+model PromoOffer {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId      String   @map("organization_id") @db.Uuid
+  sku                 String
+  title               String?
+  kind                String
+  listPrice           Decimal  @default(0) @map("list_price") @db.Decimal(14, 2)
+  offerPrice          Decimal  @map("offer_price") @db.Decimal(14, 2)
+  targetMarginPct     Decimal  @default(15) @map("target_margin_pct") @db.Decimal(7, 4)
+  estimatedMarginPct  Decimal  @default(0) @map("estimated_margin_pct") @db.Decimal(7, 4)
+  estimatedNet        Decimal  @default(0) @map("estimated_net") @db.Decimal(14, 2)
+  source              String   @default("import")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, sku, kind])
+  @@index([organizationId, createdAt])
+  @@map("promo_offers")
+  @@schema("analytics")
+}
+
+model PriceApplyLog {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  itemCount      Int      @map("item_count")
+  items          Json
+  acknowledged   Boolean  @default(true)
+  note           String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@map("price_apply_logs")
+  @@schema("analytics")
+}
+
+model RadarPref {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId        String   @unique @map("organization_id") @db.Uuid
+  priceDropPctThreshold Decimal  @default(3) @map("price_drop_pct_threshold") @db.Decimal(7, 4)
+  stockAlertEnabled     Boolean  @default(true) @map("stock_alert_enabled")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("radar_prefs")
+  @@schema("analytics")
+}
+
+model SavedScenario {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
+  name               String
+  productId          String?  @map("product_id") @db.Uuid
+  productTitle       String?  @map("product_title")
+  commissionDeltaPts Decimal  @default(0) @map("commission_delta_pts") @db.Decimal(7, 4)
+  shippingDelta      Decimal  @default(0) @map("shipping_delta") @db.Decimal(14, 2)
+  flashDiscountPct   Decimal  @default(0) @map("flash_discount_pct") @db.Decimal(7, 4)
+  snapshot           Json?
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@map("saved_scenarios")
+  @@schema("analytics")
+}
+
+/** Kaydedilmiş senaryo karşılaştırma geçmişi. */
+model ScenarioComparison {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  leftId         String   @map("left_id") @db.Uuid
+  rightId        String   @map("right_id") @db.Uuid
+  leftName       String   @map("left_name")
+  rightName      String   @map("right_name")
+  deltaNetDiff   Decimal  @map("delta_net_diff") @db.Decimal(14, 2)
+  winner         String
+  message        String
+  result         Json
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@map("scenario_comparisons")
+  @@schema("analytics")
+}
+
+/** Kategori × kanal komisyon tarifesi (standart + Plus). */
+model CommissionTariff {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  marketplace    Marketplace
+  category       String
+  rate           Decimal     @db.Decimal(7, 4)
+  plusRate       Decimal     @map("plus_rate") @db.Decimal(7, 4)
+  note           String?
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, marketplace, category])
+  @@index([organizationId, marketplace])
+  @@map("commission_tariffs")
+  @@schema("analytics")
+}
+
+/** Mağaza bazlı tarife override — org varsayılanının üzerine yazar. */
+model CommissionTariffOverride {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  storeId        String   @map("store_id") @db.Uuid
+  category       String
+  rate           Decimal  @db.Decimal(7, 4)
+  plusRate       Decimal  @map("plus_rate") @db.Decimal(7, 4)
+  note           String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, category])
+  @@index([organizationId, storeId])
+  @@map("commission_tariff_overrides")
+  @@schema("analytics")
+}
+
+/** Hakedişten gelen barkod bazlı komisyon (ürün seviyesi). */
+model CommissionBarcodeRate {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  marketplace    Marketplace
+  barcode        String
+  rate           Decimal     @db.Decimal(7, 4)
+  plusRate       Decimal     @map("plus_rate") @db.Decimal(7, 4)
+  sampleCount    Int         @default(1) @map("sample_count")
+  note           String?
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, marketplace, barcode])
+  @@index([organizationId, marketplace])
+  @@map("commission_barcode_rates")
+  @@schema("analytics")
+}
+
+/** Barkod örneklerinden türetilen marka medyan komisyonu (HP %13,5 vb.). */
+model CommissionBrandRate {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  marketplace    Marketplace
+  brand          String
+  rate           Decimal     @db.Decimal(7, 4)
+  plusRate       Decimal     @map("plus_rate") @db.Decimal(7, 4)
+  sampleCount    Int         @default(1) @map("sample_count")
+  note           String?
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, marketplace, brand])
+  @@index([organizationId, marketplace])
+  @@map("commission_brand_rates")
+  @@schema("analytics")
+}
+
+model AuditLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  meta       Json?
+  ip         String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+  @@schema("audit")
+}
